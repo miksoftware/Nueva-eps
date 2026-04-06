@@ -5,6 +5,13 @@ namespace App\Http\Controllers;
 use App\Models\Consulta;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Color;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
 
 class ConsultaController extends Controller
 {
@@ -25,19 +32,54 @@ class ConsultaController extends Controller
     public function upload(Request $request)
     {
         $request->validate([
-            'csv_file' => ['required', 'file', 'mimes:csv,txt', 'max:2048'],
+            'csv_file' => ['required', 'file', 'max:2048'],
         ]);
 
         $file = $request->file('csv_file');
-        $content = file_get_contents($file->getRealPath());
-        $lines = array_filter(array_map('trim', explode("\n", $content)));
+        $extension = strtolower($file->getClientOriginalExtension());
 
-        // Remove header if it looks like one
-        if (!empty($lines) && !is_numeric(str_replace(['-', '.'], '', $lines[0]))) {
-            array_shift($lines);
+        if (!in_array($extension, ['csv', 'txt', 'xlsx', 'xls'])) {
+            return response()->json(['success' => false, 'message' => 'Formato no soportado. Use CSV, TXT o XLSX.'], 422);
         }
 
-        $cedulas = array_values(array_unique(array_filter($lines, fn($l) => preg_match('/^\d+$/', $l))));
+        $cedulas = [];
+
+        if (in_array($extension, ['xlsx', 'xls'])) {
+            // Parse Excel file
+            $spreadsheet = IOFactory::load($file->getRealPath());
+            $worksheet = $spreadsheet->getActiveSheet();
+
+            foreach ($worksheet->getRowIterator() as $row) {
+                $cellIterator = $row->getCellIterator();
+                $cellIterator->setIterateOnlyExistingCells(true);
+
+                foreach ($cellIterator as $cell) {
+                    $value = trim((string) $cell->getValue());
+                    if (preg_match('/^\d+$/', $value)) {
+                        $cedulas[] = $value;
+                    }
+                    break; // Only first column
+                }
+            }
+
+            // Remove header if first value is not numeric
+            if (!empty($cedulas) && !is_numeric(str_replace(['-', '.'], '', $cedulas[0]))) {
+                array_shift($cedulas);
+            }
+        } else {
+            // Parse CSV/TXT file
+            $content = file_get_contents($file->getRealPath());
+            $lines = array_filter(array_map('trim', explode("\n", $content)));
+
+            // Remove header if it looks like one
+            if (!empty($lines) && !is_numeric(str_replace(['-', '.'], '', $lines[0]))) {
+                array_shift($lines);
+            }
+
+            $cedulas = array_filter($lines, fn($l) => preg_match('/^\d+$/', $l));
+        }
+
+        $cedulas = array_values(array_unique($cedulas));
 
         if (empty($cedulas)) {
             return response()->json(['success' => false, 'message' => 'No se encontraron cédulas válidas en el archivo.'], 422);
@@ -167,42 +209,110 @@ class ConsultaController extends Controller
             'Categoria', 'IPS Primaria', 'Departamento', 'Municipio',
         ];
 
-        $callback = function () use ($consultas, $headers) {
-            $file = fopen('php://output', 'w');
-            // BOM for Excel UTF-8
-            fwrite($file, "\xEF\xBB\xBF");
-            fputcsv($file, $headers, ';');
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Consultas');
 
-            foreach ($consultas as $c) {
-                fputcsv($file, [
-                    $c->tipo_documento,
-                    $c->numero_documento,
-                    $c->primer_nombre,
-                    $c->segundo_nombre,
-                    $c->primer_apellido,
-                    $c->segundo_apellido,
-                    $c->sexo,
-                    $c->celular,
-                    $c->telefono1,
-                    $c->telefono2,
-                    $c->correo_electronico,
-                    $c->tipo_afiliado,
-                    $c->regimen,
-                    $c->categoria,
-                    $c->ips_primaria,
-                    $c->departamento,
-                    $c->municipio,
-                ], ';');
+        // Write headers (row 1)
+        foreach ($headers as $colIdx => $header) {
+            $sheet->setCellValue([$colIdx + 1, 1], $header);
+        }
+
+        // Style headers
+        $lastCol = chr(64 + count($headers)); // A=65, so 17 cols = Q
+        $headerRange = "A1:{$lastCol}1";
+
+        $sheet->getStyle($headerRange)->applyFromArray([
+            'font' => [
+                'bold' => true,
+                'color' => ['rgb' => 'FFFFFF'],
+                'size' => 11,
+            ],
+            'fill' => [
+                'fillType' => Fill::FILL_SOLID,
+                'startColor' => ['rgb' => '2563EB'],
+            ],
+            'alignment' => [
+                'horizontal' => Alignment::HORIZONTAL_CENTER,
+                'vertical' => Alignment::VERTICAL_CENTER,
+            ],
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color' => ['rgb' => '1E40AF'],
+                ],
+            ],
+        ]);
+
+        $sheet->getRowDimension(1)->setRowHeight(28);
+
+        // Write data rows
+        $row = 2;
+        foreach ($consultas as $c) {
+            $data = [
+                $c->tipo_documento,
+                $c->numero_documento,
+                $c->primer_nombre,
+                $c->segundo_nombre,
+                $c->primer_apellido,
+                $c->segundo_apellido,
+                $c->sexo,
+                $c->celular,
+                $c->telefono1,
+                $c->telefono2,
+                $c->correo_electronico,
+                $c->tipo_afiliado,
+                $c->regimen,
+                $c->categoria,
+                $c->ips_primaria,
+                $c->departamento,
+                $c->municipio,
+            ];
+
+            foreach ($data as $colIdx => $value) {
+                $sheet->setCellValue([$colIdx + 1, $row], $value);
             }
 
-            fclose($file);
-        };
+            // Alternate row colors
+            $bgColor = ($row % 2 === 0) ? 'EFF6FF' : 'FFFFFF';
+            $sheet->getStyle("A{$row}:{$lastCol}{$row}")->applyFromArray([
+                'fill' => [
+                    'fillType' => Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => $bgColor],
+                ],
+                'borders' => [
+                    'allBorders' => [
+                        'borderStyle' => Border::BORDER_THIN,
+                        'color' => ['rgb' => 'D1D5DB'],
+                    ],
+                ],
+                'alignment' => [
+                    'vertical' => Alignment::VERTICAL_CENTER,
+                ],
+            ]);
 
-        $filename = "consultas_{$lote}.csv";
+            $row++;
+        }
 
-        return response()->stream($callback, 200, [
-            'Content-Type' => 'text/csv; charset=UTF-8',
-            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+        // Auto-size columns
+        foreach (range('A', $lastCol) as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+
+        // Freeze header row
+        $sheet->freezePane('A2');
+
+        // Auto-filter
+        $sheet->setAutoFilter("A1:{$lastCol}" . ($row - 1));
+
+        $filename = "consultas_{$lote}.xlsx";
+
+        $writer = new Xlsx($spreadsheet);
+
+        return response()->streamDownload(function () use ($writer) {
+            $writer->save('php://output');
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
     }
 }

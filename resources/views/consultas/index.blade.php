@@ -33,7 +33,7 @@
 @if(auth()->user()->isAdmin())
 <div class="card glass" id="uploadPanel">
     <div class="card-header">
-        <h3 class="card-title">Subir CSV con Cédulas</h3>
+        <h3 class="card-title">Subir archivo con Cédulas</h3>
         <span class="badge badge-consulta">Lote masivo</span>
     </div>
 
@@ -44,17 +44,17 @@
     @else
 
     <p style="color: #9ca3af; margin-bottom: 1rem; font-size: 0.9rem;">
-        Suba un archivo CSV con una sola columna de números de cédula (CC). Una cédula por línea.
+        Suba un archivo CSV o Excel (.xlsx) con una sola columna de números de cédula (CC). Una cédula por línea.
     </p>
 
     <div class="upload-zone" id="dropZone">
-        <input type="file" id="csvFile" accept=".csv,.txt" style="display: none;">
+        <input type="file" id="csvFile" accept=".csv,.txt,.xlsx,.xls" style="display: none;">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="1.5">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
             <polyline points="17 8 12 3 7 8"/>
             <line x1="12" y1="3" x2="12" y2="15"/>
         </svg>
-        <p style="color: #a0a0b8; margin-top: 0.5rem;">Arrastra un archivo CSV aquí o <span style="color: #3b82f6; cursor: pointer;" onclick="document.getElementById('csvFile').click()">haz clic para seleccionar</span></p>
+        <p style="color: #a0a0b8; margin-top: 0.5rem;">Arrastra un archivo CSV o Excel aquí o <span style="color: #3b82f6; cursor: pointer;" onclick="document.getElementById('csvFile').click()">haz clic para seleccionar</span></p>
         <p id="fileName" style="color: #34d399; margin-top: 0.5rem; display: none;"></p>
     </div>
 
@@ -107,7 +107,7 @@
     <div class="card-header">
         <h3 class="card-title">Resultados</h3>
         <div style="display: flex; gap: 0.5rem;">
-            <button class="btn btn-success btn-sm" id="btnExport" onclick="exportResults()">Descargar CSV</button>
+            <button class="btn btn-success btn-sm" id="btnExport" onclick="exportResults()">Descargar Excel</button>
         </div>
     </div>
 
@@ -166,7 +166,7 @@
                     <td style="color: #34d399;">{{ $lote->completados }}</td>
                     <td style="color: #f87171;">{{ $lote->errores }}</td>
                     <td class="actions">
-                        <a href="{{ route('consultas.export', $lote->lote) }}" class="btn btn-success btn-sm">CSV</a>
+                        <a href="{{ route('consultas.export', $lote->lote) }}" class="btn btn-success btn-sm">Excel</a>
                         <button class="btn btn-primary btn-sm" onclick="loadLote('{{ $lote->lote }}')">Ver</button>
                     </td>
                 </tr>
