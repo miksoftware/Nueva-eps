@@ -139,10 +139,67 @@
 </div>
 @endif {{-- end admin batch section --}}
 
-@if(auth()->user()->isAdmin() && $lotes->isNotEmpty())
+{{-- Lote viewer panel (for all users) --}}
+<div class="card glass" id="loteViewerPanel" style="display: none;">
+    <div class="card-header">
+        <h3 class="card-title">Detalle del Lote</h3>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <span class="badge badge-consulta" id="loteViewerBadge"></span>
+            <button class="btn btn-success btn-sm" id="btnLoteExport" onclick="exportViewedLote()">Descargar Excel</button>
+            <button class="btn btn-danger btn-sm" onclick="closeLoteViewer()">Cerrar</button>
+        </div>
+    </div>
+
+    <div style="display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
+        <div class="stat-box stat-total">
+            <span class="stat-label">Total</span>
+            <span class="stat-value" id="loteStatTotal">0</span>
+        </div>
+        <div class="stat-box stat-ok">
+            <span class="stat-label">Completados</span>
+            <span class="stat-value" id="loteStatOk">0</span>
+        </div>
+        <div class="stat-box stat-err">
+            <span class="stat-label">Errores</span>
+            <span class="stat-value" id="loteStatErr">0</span>
+        </div>
+        <div class="stat-box stat-pending">
+            <span class="stat-label">Pendientes</span>
+            <span class="stat-value" id="loteStatPending">0</span>
+        </div>
+    </div>
+
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Documento</th>
+                    <th>Nombre Completo</th>
+                    <th>Sexo</th>
+                    <th>Celular</th>
+                    <th>Tel 1</th>
+                    <th>Tel 2</th>
+                    <th>Correo</th>
+                    <th>Tipo Afiliado</th>
+                    <th>Régimen</th>
+                    <th>Categoría</th>
+                    <th>IPS Primaria</th>
+                    <th>Departamento</th>
+                    <th>Municipio</th>
+                    <th>Estado</th>
+                </tr>
+            </thead>
+            <tbody id="loteViewerBody">
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@if($lotes->isNotEmpty())
 <div class="card glass">
     <div class="card-header">
-        <h3 class="card-title">Lotes Anteriores</h3>
+        <h3 class="card-title">Historial de Consultas</h3>
     </div>
 
     <div class="table-wrapper">
@@ -167,7 +224,7 @@
                     <td style="color: #f87171;">{{ $lote->errores }}</td>
                     <td class="actions">
                         <a href="{{ route('consultas.export', $lote->lote) }}" class="btn btn-success btn-sm">Excel</a>
-                        <button class="btn btn-primary btn-sm" onclick="loadLote('{{ $lote->lote }}')">Ver</button>
+                        <button class="btn btn-primary btn-sm" onclick="viewLote('{{ $lote->lote }}')">Ver</button>
                     </td>
                 </tr>
                 @endforeach
@@ -782,36 +839,86 @@
         }
     }
 
-    async function loadLote(lote) {
+    // === View lote (all users) ===
+    let viewedLote = null;
+
+    async function viewLote(lote) {
         try {
             const resp = await fetchApi(`/consultas/${lote}/status`);
             const data = await resp.json();
 
             if (!data.success) return;
 
-            currentLote = lote;
-            document.getElementById('uploadPanel').style.display = 'none';
-            document.getElementById('progressPanel').style.display = 'block';
-            document.getElementById('resultsPanel').style.display = 'block';
-            document.getElementById('btnStop').style.display = 'none';
-            document.getElementById('btnNewBatch').style.display = '';
+            viewedLote = lote;
 
-            updateStats(data.total, data.completados, data.errores, data.pendientes);
+            document.getElementById('loteViewerPanel').style.display = 'block';
+            document.getElementById('loteViewerBadge').textContent = `${data.completados + data.errores} / ${data.total}`;
+            document.getElementById('loteStatTotal').textContent = data.total;
+            document.getElementById('loteStatOk').textContent = data.completados;
+            document.getElementById('loteStatErr').textContent = data.errores;
+            document.getElementById('loteStatPending').textContent = data.pendientes;
 
-            const tbody = document.getElementById('resultsBody');
+            const tbody = document.getElementById('loteViewerBody');
             tbody.innerHTML = '';
 
             data.consultas.forEach((c, i) => {
+                const tr = document.createElement('tr');
                 if (c.estado === 'completado') {
-                    addResultRow(i + 1, c);
+                    const nombre = [c.primer_nombre, c.segundo_nombre, c.primer_apellido, c.segundo_apellido].filter(Boolean).join(' ');
+                    const rowData = {...c};
+                    tr.style.cursor = 'pointer';
+                    tr.title = 'Clic para ver detalle';
+                    tr.onclick = () => showDetailModal(rowData);
+                    tr.innerHTML = `
+                        <td>${i + 1}</td>
+                        <td>${c.numero_documento}</td>
+                        <td>${nombre}</td>
+                        <td>${c.sexo || '-'}</td>
+                        <td>${c.celular || '-'}</td>
+                        <td>${c.telefono1 || '-'}</td>
+                        <td>${c.telefono2 || '-'}</td>
+                        <td style="font-size:0.8rem;">${c.correo_electronico || '-'}</td>
+                        <td>${c.tipo_afiliado || '-'}</td>
+                        <td>${c.regimen || '-'}</td>
+                        <td>${c.categoria || '-'}</td>
+                        <td style="font-size:0.78rem;">${c.ips_primaria || '-'}</td>
+                        <td>${c.departamento || '-'}</td>
+                        <td>${c.municipio || '-'}</td>
+                        <td><span class="badge badge-success">OK</span></td>
+                    `;
                 } else if (c.estado === 'error') {
-                    addResultRowError(i + 1, c.numero_documento, c.error || 'Error');
+                    tr.innerHTML = `
+                        <td>${i + 1}</td>
+                        <td>${c.numero_documento}</td>
+                        <td colspan="12" style="color: #f87171; font-size: 0.85rem;">${c.error || 'Error'}</td>
+                        <td><span class="badge badge-danger">Error</span></td>
+                    `;
                 } else {
-                    addResultRowError(i + 1, c.numero_documento, 'Pendiente');
+                    tr.innerHTML = `
+                        <td>${i + 1}</td>
+                        <td>${c.numero_documento}</td>
+                        <td colspan="12" style="color: #fbbf24; font-size: 0.85rem;">Pendiente</td>
+                        <td><span class="badge" style="background:rgba(245,158,11,0.15);color:#fbbf24;">Pendiente</span></td>
+                    `;
                 }
+                tbody.appendChild(tr);
             });
+
+            // Scroll to the panel
+            document.getElementById('loteViewerPanel').scrollIntoView({ behavior: 'smooth' });
         } catch(e) {
             alert('Error al cargar lote: ' + e.message);
+        }
+    }
+
+    function closeLoteViewer() {
+        document.getElementById('loteViewerPanel').style.display = 'none';
+        viewedLote = null;
+    }
+
+    function exportViewedLote() {
+        if (viewedLote) {
+            window.location.href = `/consultas/${viewedLote}/export`;
         }
     }
 
