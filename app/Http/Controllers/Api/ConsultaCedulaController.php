@@ -9,18 +9,19 @@ use Illuminate\Http\JsonResponse;
 class ConsultaCedulaController extends Controller
 {
     /**
-     * Retorna la información más reciente de un afiliado por cédula.
+     * Retorna el historial completo de consultas de un afiliado por cédula,
+     * ordenado del más reciente al más antiguo.
      *
      * GET /api/consulta/cedula/{cedula}
      */
     public function show(string $cedula): JsonResponse
     {
-        $resultado = Consulta::where('numero_documento', $cedula)
+        $resultados = Consulta::where('numero_documento', $cedula)
             ->where('estado', 'completado')
             ->latest('updated_at')
-            ->first();
+            ->get();
 
-        if (! $resultado) {
+        if ($resultados->isEmpty()) {
             return response()->json([
                 'success' => false,
                 'message' => 'No se encontraron resultados para la cédula proporcionada.',
@@ -28,29 +29,32 @@ class ConsultaCedulaController extends Controller
             ], 404);
         }
 
+        $data = $resultados->map(fn (Consulta $r) => [
+            'cedula'              => $r->numero_documento,
+            'tipo_documento'      => $r->tipo_documento,
+            'primer_nombre'       => $r->primer_nombre,
+            'segundo_nombre'      => $r->segundo_nombre,
+            'primer_apellido'     => $r->primer_apellido,
+            'segundo_apellido'    => $r->segundo_apellido,
+            'sexo'                => $r->sexo,
+            'celular'             => $r->celular,
+            'telefono1'           => $r->telefono1,
+            'telefono2'           => $r->telefono2,
+            'correo_electronico'  => $r->correo_electronico,
+            'tipo_afiliado'       => $r->tipo_afiliado,
+            'regimen'             => $r->regimen,
+            'categoria'           => $r->categoria,
+            'ips_primaria'        => $r->ips_primaria,
+            'departamento'        => $r->departamento,
+            'municipio'           => $r->municipio,
+            'consultado_en'       => $r->updated_at?->toIso8601String(),
+        ]);
+
         return response()->json([
             'success' => true,
             'message' => 'Consulta exitosa.',
-            'data'    => [
-                'cedula'              => $resultado->numero_documento,
-                'tipo_documento'      => $resultado->tipo_documento,
-                'primer_nombre'       => $resultado->primer_nombre,
-                'segundo_nombre'      => $resultado->segundo_nombre,
-                'primer_apellido'     => $resultado->primer_apellido,
-                'segundo_apellido'    => $resultado->segundo_apellido,
-                'sexo'                => $resultado->sexo,
-                'celular'             => $resultado->celular,
-                'telefono1'           => $resultado->telefono1,
-                'telefono2'           => $resultado->telefono2,
-                'correo_electronico'  => $resultado->correo_electronico,
-                'tipo_afiliado'       => $resultado->tipo_afiliado,
-                'regimen'             => $resultado->regimen,
-                'categoria'           => $resultado->categoria,
-                'ips_primaria'        => $resultado->ips_primaria,
-                'departamento'        => $resultado->departamento,
-                'municipio'           => $resultado->municipio,
-                'consultado_en'       => $resultado->updated_at?->toIso8601String(),
-            ],
+            'total'   => $data->count(),
+            'data'    => $data,
         ]);
     }
 }
