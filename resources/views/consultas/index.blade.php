@@ -145,10 +145,15 @@
         <h3 class="card-title">Detalle del Lote</h3>
         <div style="display: flex; gap: 0.5rem; align-items: center;">
             <span class="badge badge-consulta" id="loteViewerBadge"></span>
+            @if(auth()->user()->isAdmin())
+            <button class="btn btn-warning btn-sm" id="btnLoteResume" onclick="continueViewedLote()" style="display:none;">Continuar pendientes</button>
+            @endif
             <button class="btn btn-success btn-sm" id="btnLoteExport" onclick="exportViewedLote()">Descargar Excel</button>
             <button class="btn btn-danger btn-sm" onclick="closeLoteViewer()">Cerrar</button>
         </div>
     </div>
+
+    <div class="alert alert-info" id="loteDiagnostics" style="display:none; margin-bottom: 1rem;"></div>
 
     <div style="display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
         <div class="stat-box stat-total">
@@ -211,6 +216,7 @@
                     <th>Total</th>
                     <th>Completados</th>
                     <th>Errores</th>
+                    <th>Pendientes</th>
                     <th>Acciones</th>
                 </tr>
             </thead>
@@ -222,9 +228,15 @@
                     <td>{{ $lote->total }}</td>
                     <td style="color: #34d399;">{{ $lote->completados }}</td>
                     <td style="color: #f87171;">{{ $lote->errores }}</td>
+                    <td style="color: #fbbf24;">{{ $lote->pendientes }}</td>
                     <td class="actions">
                         <a href="{{ route('consultas.export', $lote->lote) }}" class="btn btn-success btn-sm">Excel</a>
                         <button class="btn btn-primary btn-sm" onclick="viewLote('{{ $lote->lote }}')">Ver</button>
+                        @if(auth()->user()->isAdmin())
+                        @if($lote->pendientes > 0)
+                        <button class="btn btn-warning btn-sm" onclick="continueLote('{{ $lote->lote }}')">Continuar</button>
+                        @endif
+                        @endif
                     </td>
                 </tr>
                 @endforeach
@@ -255,6 +267,7 @@
     const IS_ADMIN = {{ auth()->user()->isAdmin() ? 'true' : 'false' }};
     @if(auth()->user()->isAdmin())
     const UPLOAD_URL = '{{ route("consultas.upload") }}';
+    const RESUME_URL_TEMPLATE = '{{ route("consultas.resumeData", ["lote" => "__LOTE__"]) }}';
     @endif
 
     let currentLote = null;
@@ -573,6 +586,11 @@
 
     // === Process each cédula ===
     async function startProcessing(cedulas) {
+        if (processing) {
+            alert('Ya hay un procesamiento en curso.');
+            return;
+        }
+
         processing = true;
         stopRequested = false;
         const total = cedulas.length;
@@ -626,6 +644,10 @@
         document.getElementById('btnStop').style.display = 'none';
         document.getElementById('btnNewBatch').style.display = '';
         logMsg('info', `Procesamiento finalizado. OK: ${ok}, Errores: ${errors}`);
+
+        if (currentLote) {
+            viewLote(currentLote);
+        }
     }
 
     // === Consultar cédula en la API EPS ===
@@ -734,7 +756,13 @@
 
         // Check if we got at least a name
         if (!extracted.primer_nombre && !extracted.primer_apellido) {
-            const errMsg = src1.message || src1.Message || src1.error || src2.message || src2.Message || 'Afiliado no encontrado';
+            const errMsg = afiliadoData?.message
+                || afiliadoData?.Message
+                || afiliadoData?.error
+                || pacienteData?.message
+                || pacienteData?.Message
+                || pacienteData?.error
+                || 'Afiliado no encontrado';
             return { success: false, error: typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg) };
         }
 
@@ -858,6 +886,33 @@
             document.getElementById('loteStatErr').textContent = data.errores;
             document.getElementById('loteStatPending').textContent = data.pendientes;
 
+            const diagEl = document.getElementById('loteDiagnostics');
+            if (diagEl) {
+                const diag = data.diagnostico || {};
+                const fecha = diag.ultima_ejecucion ? new Date(diag.ultima_ejecucion).toLocaleString() : 'Sin actividad';
+                const erroresFrecuentes = Array.isArray(diag.errores_frecuentes)
+                    ? diag.errores_frecuentes.map(e => `(${e.cantidad}) ${e.mensaje}`).join(' | ')
+                    : '';
+
+                let diagText = `Última ejecución: ${fecha}. `;
+                if (diag.motivo_probable) {
+                    diagText += `Posible causa: ${diag.motivo_probable}. `;
+                }
+                if (erroresFrecuentes) {
+                    diagText += `Errores frecuentes: ${erroresFrecuentes}.`;
+                }
+
+                diagEl.textContent = diagText;
+                diagEl.style.display = 'block';
+            }
+
+            const btnResume = document.getElementById('btnLoteResume');
+            if (btnResume) {
+                btnResume.style.display = (IS_ADMIN && data.pendientes > 0) ? '' : 'none';
+                btnResume.disabled = false;
+                btnResume.textContent = 'Continuar pendientes';
+            }
+
             const tbody = document.getElementById('loteViewerBody');
             tbody.innerHTML = '';
 
@@ -909,6 +964,64 @@
         } catch(e) {
             alert('Error al cargar lote: ' + e.message);
         }
+    }
+
+    function getResumeUrl(lote) {
+        return RESUME_URL_TEMPLATE.replace('__LOTE__', encodeURIComponent(lote));
+    }
+
+    async function continueLote(lote) {
+        if (!IS_ADMIN) return;
+        if (processing) {
+            alert('Hay un proceso en curso. Espere a que finalice.');
+            return;
+        }
+
+        try {
+            const resp = await fetchApi(getResumeUrl(lote));
+            const data = await resp.json();
+
+            if (!data.success) {
+                alert(data.message || 'No fue posible consultar pendientes del lote.');
+                return;
+            }
+
+            if (!data.cedulas_pendientes || data.cedulas_pendientes.length === 0) {
+                alert('Este lote no tiene pendientes.');
+                await viewLote(lote);
+                return;
+            }
+
+            currentLote = lote;
+
+            document.getElementById('progressPanel').style.display = 'block';
+            document.getElementById('resultsPanel').style.display = 'block';
+            document.getElementById('resultsBody').innerHTML = '';
+
+            updateStats(data.pendientes, 0, 0, data.pendientes);
+            logMsg('info', `Reanudando lote ${lote}. Pendientes: ${data.pendientes}`);
+
+            await startProcessing(data.cedulas_pendientes);
+        } catch (e) {
+            alert('Error al reanudar lote: ' + e.message);
+        }
+    }
+
+    function continueViewedLote() {
+        if (!viewedLote) return;
+
+        const btnResume = document.getElementById('btnLoteResume');
+        if (btnResume) {
+            btnResume.disabled = true;
+            btnResume.textContent = 'Reanudando...';
+        }
+
+        continueLote(viewedLote).finally(() => {
+            if (btnResume) {
+                btnResume.disabled = false;
+                btnResume.textContent = 'Continuar pendientes';
+            }
+        });
     }
 
     function closeLoteViewer() {

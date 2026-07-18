@@ -15,12 +15,47 @@ use PhpOffice\PhpSpreadsheet\Style\Fill;
 
 class ConsultaController extends Controller
 {
+    private function buildLoteDiagnostics($consultas): array
+    {
+        $lastProcessed = $consultas
+            ->whereIn('estado', ['completado', 'error'])
+            ->sortByDesc('updated_at')
+            ->first();
+
+        $topErrors = $consultas
+            ->where('estado', 'error')
+            ->pluck('error')
+            ->filter()
+            ->countBy()
+            ->sortDesc()
+            ->take(5)
+            ->map(fn ($count, $message) => [
+                'mensaje' => $message,
+                'cantidad' => $count,
+            ])
+            ->values();
+
+        $pendientes = $consultas->where('estado', 'pendiente')->count();
+
+        $motivo = null;
+        if ($pendientes > 0) {
+            $motivo = 'El lote tiene pendientes porque el procesamiento se interrumpio antes de terminar (cierre/recarga del navegador, detencion manual o sesion EPS vencida).';
+        }
+
+        return [
+            'ultima_ejecucion' => $lastProcessed?->updated_at,
+            'motivo_probable' => $motivo,
+            'errores_frecuentes' => $topErrors,
+        ];
+    }
+
     public function index()
     {
         $lotes = Consulta::select('lote')
             ->selectRaw('COUNT(*) as total')
             ->selectRaw("SUM(CASE WHEN estado = 'completado' THEN 1 ELSE 0 END) as completados")
             ->selectRaw("SUM(CASE WHEN estado = 'error' THEN 1 ELSE 0 END) as errores")
+            ->selectRaw("SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) as pendientes")
             ->selectRaw('MIN(created_at) as fecha')
             ->groupBy('lote')
             ->orderByDesc('fecha')
@@ -180,13 +215,44 @@ class ConsultaController extends Controller
             return response()->json(['success' => false, 'message' => 'Lote no encontrado.'], 404);
         }
 
+        $diagnostico = $this->buildLoteDiagnostics($consultas);
+
         return response()->json([
             'success' => true,
             'total' => $consultas->count(),
             'completados' => $consultas->where('estado', 'completado')->count(),
             'errores' => $consultas->where('estado', 'error')->count(),
             'pendientes' => $consultas->where('estado', 'pendiente')->count(),
+            'diagnostico' => $diagnostico,
             'consultas' => $consultas,
+        ]);
+    }
+
+    public function resumeData(string $lote)
+    {
+        $consultas = Consulta::where('lote', $lote)->get();
+
+        if ($consultas->isEmpty()) {
+            return response()->json(['success' => false, 'message' => 'Lote no encontrado.'], 404);
+        }
+
+        $pendientes = $consultas
+            ->where('estado', 'pendiente')
+            ->pluck('numero_documento')
+            ->filter()
+            ->values();
+
+        $diagnostico = $this->buildLoteDiagnostics($consultas);
+
+        return response()->json([
+            'success' => true,
+            'lote' => $lote,
+            'total' => $consultas->count(),
+            'completados' => $consultas->where('estado', 'completado')->count(),
+            'errores' => $consultas->where('estado', 'error')->count(),
+            'pendientes' => $pendientes->count(),
+            'cedulas_pendientes' => $pendientes,
+            'diagnostico' => $diagnostico,
         ]);
     }
 

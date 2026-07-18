@@ -35,5 +35,6 @@ Route::middleware('auth')->group(function () {
 
         // CSV upload (admin only)
         Route::post('/consultas/upload', [ConsultaController::class, 'upload'])->name('consultas.upload');
+        Route::get('/consultas/{lote}/resume-data', [ConsultaController::class, 'resumeData'])->name('consultas.resumeData');
     });
 });
