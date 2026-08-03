@@ -771,18 +771,21 @@
 
     async function saveResultToBackend(cedula, estado, data, errorMsg) {
         try {
-            await fetchApi(SAVE_RESULT_URL, {
+            const resp = await fetchApi(SAVE_RESULT_URL, {
                 method: 'POST',
                 body: JSON.stringify({
                     lote: currentLote,
-                    numero_documento: cedula,
+                    numero_documento: String(cedula),
                     estado: estado,
                     data: data,
                     error_message: errorMsg,
                 }),
             });
+            if (!resp.ok) {
+                console.error(`Error guardando CC ${cedula} en BD:`, await resp.text());
+            }
         } catch(e) {
-            // silent fail for backend save
+            console.error(`Excepción guardando CC ${cedula} en BD:`, e);
         }
     }
 

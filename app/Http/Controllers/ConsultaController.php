@@ -149,7 +149,7 @@ class ConsultaController extends Controller
     {
         $request->validate([
             'lote' => ['required', 'string'],
-            'numero_documento' => ['required', 'string'],
+            'numero_documento' => ['required'],
             'estado' => ['required', 'in:completado,error'],
         ]);
 
